@@ -7,28 +7,86 @@ Usage:
 """
 
 import argparse
-import itertools
-import sys
-import tempfile
 import tkinter as tk
 from pathlib import Path
 
 from tqdm import tqdm
 
 from gui import OCRApp
-from model import ENGINES, MODEL_ID, load_model, model_cache_info, repo_size_gb, write_inspector_transcript
+from model import ENGINES, MODEL_ID, load_model, model_cache_info, repo_size_gb
 from ocr import FORMATS, run_ocr_pages, transcribe_page
-from pages import get_page_images, get_pdf_images
+from pages import get_page_images
 from normalize import get_normalizer, normalize_transcribe
 from chrome_ocr_engine import chrome_transcribe_page, get_screenai_engine
 from windows_ocr import get_ocr_engine, oneocr_transcribe_page
+from pdf_batch import BATCH_LAYOUTS, PER_PDF, create_jobs, place_pagemap
+from pdf_pipeline import process_pdf
+
+
+def create_transcriber(args):
+    """Initialize one OCR engine for a single file or an entire batch."""
+    if args.engine == "oneocr":
+        engine = get_ocr_engine()
+        transcribe = lambda p: oneocr_transcribe_page(engine, p)
+    elif args.engine == "chrome":
+        engine = get_screenai_engine()
+        transcribe = lambda p: chrome_transcribe_page(engine, p)
+    else:
+        cached, _ = model_cache_info()
+        if not cached:
+            print(f"[INFO] Model {MODEL_ID} is not downloaded yet (~{repo_size_gb():.1f} GB).")
+            try:
+                confirm = input("Download it now? [y/N] ")
+            except EOFError:
+                confirm = ""
+            if confirm.strip().lower() not in ("y", "yes"):
+                print("Aborted - model not downloaded.")
+                return None
+        processor, model, _ = load_model(force_cpu=args.cpu)
+        transcribe = lambda p: transcribe_page(processor, model, p, args.max_new_tokens)
+
+    if args.normalize:
+        transcribe = normalize_transcribe(transcribe, get_normalizer())
+        print("[INFO] Persian normalization enabled (hazm)")
+    return transcribe
+
+
+def run_pdf_batch(args, parser):
+    if args.skip_ocr:
+        parser.error("--skip-ocr is not supported with --pdfs")
+    jobs = create_jobs((Path(path) for path in args.pdfs), args.output_dir, args.batch_layout)
+    transcribe = None if args.engine == "inspector" else create_transcriber(args)
+    if args.engine != "inspector" and transcribe is None:
+        return 1
+
+    failures = []
+    for index, job in enumerate(jobs, start=1):
+        print(f"\n=== PDF {index}/{len(jobs)}: {job.input_path.name} ===")
+        try:
+            process_pdf(
+                job.input_path, job.output_base, args.formats, args.direction,
+                args.engine, transcribe=transcribe, limit=args.limit,
+                workers=args.workers, log=print,
+            )
+            place_pagemap(job)
+        except Exception as error:
+            failures.append(job.input_path)
+            print(f"[ERROR] {job.input_path.name}: {error}")
+
+    print(f"\nPDFs succeeded: {len(jobs) - len(failures)}/{len(jobs)}")
+    print(f"Output directory: {Path(args.output_dir).resolve()}")
+    return 1 if failures else 0
 
 
 def main():
     parser = argparse.ArgumentParser(description="Batch OCR a folder of book page images or a PDF file.")
     parser.add_argument("--input_dir", help="Folder containing page images")
     parser.add_argument("--pdf", help="Path to a PDF file")
+    parser.add_argument("--pdfs", nargs="+", help="Paths to multiple PDF files")
     parser.add_argument("--output_file", default="book_transcript", help="Transcript output base name (extension added per format)")
+    parser.add_argument("--output_dir", default="transcripts", help="Output folder for --pdfs")
+    parser.add_argument("--batch_layout", choices=BATCH_LAYOUTS, default=PER_PDF,
+                        help="Batch output layout: per_pdf or by_type")
     parser.add_argument("--formats", nargs="+", choices=FORMATS, default=["md"], help="Output formats to write (md txt epub pdf azw3; epub/pdf/azw3 need calibre)")
     parser.add_argument("--max_new_tokens", type=int, default=1024, help="Max tokens generated per page")
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N pages")
@@ -42,18 +100,18 @@ def main():
     args = parser.parse_args()
 
     # Launch GUI if --gui or no CLI args provided
-    if args.gui or (not args.input_dir and not args.pdf):
+    if args.gui or (not args.input_dir and not args.pdf and not args.pdfs):
         root = tk.Tk()
         OCRApp(root)
         root.mainloop()
         return
 
-    if not args.input_dir and not args.pdf:
-        parser.error("Either --input_dir or --pdf is required.")
-    if args.input_dir and args.pdf:
-        parser.error("Use either --input_dir or --pdf, not both.")
-    if args.engine == "inspector" and not args.pdf:
+    if sum(bool(source) for source in (args.input_dir, args.pdf, args.pdfs)) != 1:
+        parser.error("Use exactly one of --input_dir, --pdf, or --pdfs.")
+    if args.engine == "inspector" and args.input_dir:
         parser.error("--engine inspector requires --pdf (pdf-inspector only processes PDFs).")
+    if args.pdfs:
+        return run_pdf_batch(args, parser)
 
     output_base = Path(args.output_file)
 
@@ -63,56 +121,26 @@ def main():
         print("[INFO] OCR skipped - re-exported from existing markdown")
         return
 
-    if args.engine == "inspector":
-        write_inspector_transcript(Path(args.pdf), output_base, args.formats, args.direction)
-        return
-
-    pdf_tmp_dir = None
-    total_pages = None
-
     if args.pdf:
-        pdf_path = Path(args.pdf)
-        if not pdf_path.is_file():
-            parser.error(f"PDF file not found: {pdf_path}")
-        pdf_tmp_dir = Path(tempfile.mkdtemp(prefix="ocr_pdf_"))
-        pages, total_pages = get_pdf_images(pdf_path, pdf_tmp_dir)
-        if args.limit:
-            pages = itertools.islice(pages, args.limit)
-            total_pages = min(total_pages, args.limit)
-    else:
-        input_dir = Path(args.input_dir)
-        pages = get_page_images(input_dir)
-        total_pages = len(pages)
-        if args.limit:
-            pages = pages[: args.limit]
-            total_pages = len(pages)
+        transcribe = None if args.engine == "inspector" else create_transcriber(args)
+        if args.engine != "inspector" and transcribe is None:
+            return 1
+        process_pdf(
+            args.pdf, output_base, args.formats, args.direction, args.engine,
+            transcribe=transcribe, limit=args.limit, workers=args.workers,
+            log=print,
+        )
+        return 0
 
+    pages = get_page_images(Path(args.input_dir))
+    if args.limit:
+        pages = pages[:args.limit]
+    total_pages = len(pages)
     print(f"[INFO] Found {total_pages} pages to process.")
 
-    cached, _ = model_cache_info()
-    if not cached:
-        print(f"[INFO] Model {MODEL_ID} is not downloaded yet (~{repo_size_gb():.1f} GB).")
-        try:
-            confirm = input("Download it now? [y/N] ")
-        except EOFError:
-            confirm = ""
-        if confirm.strip().lower() not in ("y", "yes"):
-            print("Aborted - model not downloaded.")
-            sys.exit(0)
-
-    if args.engine == "oneocr":
-        engine = get_ocr_engine()
-        transcribe = lambda p: oneocr_transcribe_page(engine, p)
-    elif args.engine == "chrome":
-        engine = get_screenai_engine()
-        transcribe = lambda p: chrome_transcribe_page(engine, p)
-    else:
-        processor, model, device = load_model(force_cpu=args.cpu)
-        transcribe = lambda p: transcribe_page(processor, model, p, args.max_new_tokens)
-
-    if args.normalize:
-        transcribe = normalize_transcribe(transcribe, get_normalizer())
-        print("[INFO] Persian normalization enabled (hazm)")
+    transcribe = create_transcriber(args)
+    if transcribe is None:
+        return 1
 
     def show_progress(i, tot, elapsed, name):
         tqdm.write(f"[{i}/{tot}] {name} - {elapsed:.2f}s")
@@ -134,11 +162,8 @@ def main():
         progress=show_progress,
     )
 
-    if pdf_tmp_dir:
-        for f in pdf_tmp_dir.iterdir():
-            f.unlink()
-        pdf_tmp_dir.rmdir()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
