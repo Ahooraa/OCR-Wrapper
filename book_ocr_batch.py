@@ -7,12 +7,11 @@ Usage:
 """
 
 import argparse
-import tkinter as tk
 from pathlib import Path
 
 from tqdm import tqdm
 
-from gui import OCRApp
+from gui import launch_gui
 from model import ENGINES, MODEL_ID, load_model, model_cache_info, repo_size_gb
 from ocr import FORMATS, run_ocr_pages, transcribe_page
 from pages import get_page_images
@@ -101,10 +100,7 @@ def main():
 
     # Launch GUI if --gui or no CLI args provided
     if args.gui or (not args.input_dir and not args.pdf and not args.pdfs):
-        root = tk.Tk()
-        OCRApp(root)
-        root.mainloop()
-        return
+        return launch_gui()
 
     if sum(bool(source) for source in (args.input_dir, args.pdf, args.pdfs)) != 1:
         parser.error("Use exactly one of --input_dir, --pdf, or --pdfs.")
