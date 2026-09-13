@@ -54,6 +54,12 @@ python book_ocr_batch.py
 python book_ocr_batch.py --pdf book.pdf --output_file transcript
 ```
 
+Keep the outputs next to the source PDF instead of the working directory (`--output_file` then supplies only the name):
+
+```bash
+python book_ocr_batch.py --pdf books/paper.pdf --output_file transcript --same_dir
+```
+
 Fast text extraction of a text-based PDF (no OCR, no model download):
 
 ```bash
@@ -126,6 +132,7 @@ python book_ocr_batch.py --skip-ocr --output_file transcript --formats epub azw3
 | `--pdfs` | — | Paths to one or more selected PDF files |
 | `--input_dir` | — | Folder of page images |
 | `--output_file` | `book_transcript` | Output base name (extension added per format) |
+| `--same_dir` | off | Write outputs next to the input (beside the PDF, or inside the image folder) |
 | `--output_dir` | `transcripts` | Root output folder for `--pdfs` |
 | `--batch_layout` | `per_pdf` | Batch layout: `per_pdf` or `by_type` |
 | `--formats` | `md` | Output formats: `md` `txt` `epub` `pdf` `azw3` (ebook formats need calibre) |
@@ -144,6 +151,7 @@ python book_ocr_batch.py --skip-ocr --output_file transcript --formats epub azw3
 - **Markdown** 📄 — a clean continuous document with paragraphs merged across page boundaries (no `## Page N` markers), wrapped in `<div dir="rtl">` for renderers
 - **Formats** 🗂️ — `md`/`txt` are written directly; `epub`/`pdf`/`azw3` are produced via calibre (`ebook-convert`)
 - **Sidecar** 🗺️ — a `.pagemap.json` file records real page-break indices so re-exports via `--skip-ocr` keep the page structure
+- **Next to the input** 📁 — `--same_dir` (GUI: “Save next to input”) writes the transcript beside the source PDF, or inside the image folder, instead of the working directory; with “Save in folder” the transcript folder is created there
 - For `pdf-inspector`, `[0]` is a normal page-map value: the whole PDF was extracted as one document block beginning at paragraph zero
 - **Kindle** 📖 — `epub`/`azw3` output is pre-shaped Arabic-script Persian for e-ink; the `.md`/`.txt` stay canonical and searchable
 
