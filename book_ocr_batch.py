@@ -18,7 +18,7 @@ from pages import get_page_images
 from normalize import get_normalizer, normalize_transcribe
 from chrome_ocr_engine import chrome_transcribe_page, get_screenai_engine
 from windows_ocr import get_ocr_engine, oneocr_transcribe_page
-from pdf_batch import BATCH_LAYOUTS, PER_PDF, create_jobs, place_pagemap
+from pdf_batch import BATCH_LAYOUTS, PER_PDF, beside_input, create_jobs, place_pagemap
 from pdf_pipeline import process_pdf
 
 
@@ -83,6 +83,8 @@ def main():
     parser.add_argument("--pdf", help="Path to a PDF file")
     parser.add_argument("--pdfs", nargs="+", help="Paths to multiple PDF files")
     parser.add_argument("--output_file", default="book_transcript", help="Transcript output base name (extension added per format)")
+    parser.add_argument("--same_dir", action="store_true",
+                        help="Write outputs next to the input: beside the PDF, or inside the image folder")
     parser.add_argument("--output_dir", default="transcripts", help="Output folder for --pdfs")
     parser.add_argument("--batch_layout", choices=BATCH_LAYOUTS, default=PER_PDF,
                         help="Batch output layout: per_pdf or by_type")
@@ -106,10 +108,16 @@ def main():
         parser.error("Use exactly one of --input_dir, --pdf, or --pdfs.")
     if args.engine == "inspector" and args.input_dir:
         parser.error("--engine inspector requires --pdf (pdf-inspector only processes PDFs).")
+    if args.same_dir and args.pdfs:
+        parser.error("--same_dir is not supported with --pdfs (use --output_dir).")
     if args.pdfs:
         return run_pdf_batch(args, parser)
 
     output_base = Path(args.output_file)
+    if args.same_dir:
+        output_base = beside_input(
+            output_base, args.pdf or args.input_dir, source_is_dir=bool(args.input_dir),
+        )
 
     if args.skip_ocr:
         from ocr import write_outputs
