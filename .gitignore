@@ -1,7 +1,16 @@
+# Input PDFs
 *.pdf
+
+# Generated transcripts, ebooks, and page maps (README is the only tracked md)
 *.md
 !README.md
-*.azw3
-*.epub
 *.txt
+*.epub
+*.azw3
+*.pagemap.json
+transcripts/
+
+# Local environments, caches, and tool state
+.venv/
 __pycache__/
+.freebuff/
