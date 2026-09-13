@@ -60,6 +60,20 @@ Fast text extraction of a text-based PDF (no OCR, no model download):
 python book_ocr_batch.py --pdf book.pdf --engine inspector --output_file transcript
 ```
 
+Process several selected PDFs with the same settings:
+
+```bash
+python book_ocr_batch.py --pdfs paper-one.pdf paper-two.pdf --engine inspector --direction ltr --output_dir transcripts
+```
+
+Batch mode offers two output layouts:
+
+- `per_pdf` (default): one short-named folder per PDF containing `transcript.md` and `transcript.pagemap.json`
+- `by_type`: all Markdown files under `markdown/` and all page-map files under `pagemaps/`
+
+Long PDF names are shortened with a stable hash so the generated files remain
+openable by Windows applications that enforce the legacy path-length limit.
+
 Windows Snipping Tool OCR (high accuracy, fully offline — needs model files, see [oneocr setup](#oneocr-setup-windows-snipping-tool-ocr)):
 
 ```bash
@@ -109,8 +123,11 @@ python book_ocr_batch.py --skip-ocr --output_file transcript --formats epub azw3
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--pdf` | — | Path to PDF file |
+| `--pdfs` | — | Paths to one or more selected PDF files |
 | `--input_dir` | — | Folder of page images |
 | `--output_file` | `book_transcript` | Output base name (extension added per format) |
+| `--output_dir` | `transcripts` | Root output folder for `--pdfs` |
+| `--batch_layout` | `per_pdf` | Batch layout: `per_pdf` or `by_type` |
 | `--formats` | `md` | Output formats: `md` `txt` `epub` `pdf` `azw3` (ebook formats need calibre) |
 | `--direction` | `rtl` | Text direction of the exported output (`rtl`/`ltr`) |
 | `--max_new_tokens` | `1024` | Max tokens generated per page (bina) |
@@ -127,6 +144,7 @@ python book_ocr_batch.py --skip-ocr --output_file transcript --formats epub azw3
 - **Markdown** 📄 — a clean continuous document with paragraphs merged across page boundaries (no `## Page N` markers), wrapped in `<div dir="rtl">` for renderers
 - **Formats** 🗂️ — `md`/`txt` are written directly; `epub`/`pdf`/`azw3` are produced via calibre (`ebook-convert`)
 - **Sidecar** 🗺️ — a `.pagemap.json` file records real page-break indices so re-exports via `--skip-ocr` keep the page structure
+- For `pdf-inspector`, `[0]` is a normal page-map value: the whole PDF was extracted as one document block beginning at paragraph zero
 - **Kindle** 📖 — `epub`/`azw3` output is pre-shaped Arabic-script Persian for e-ink; the `.md`/`.txt` stay canonical and searchable
 
 ### Sample result (page 1 of «۱» , RTL Persian) 🎯

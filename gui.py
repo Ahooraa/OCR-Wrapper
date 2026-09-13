@@ -16,6 +16,8 @@ from ocr import FORMATS, run_ocr_pages, transcribe_page, write_outputs
 from pages import PDF_DPI, get_page_images, get_pdf_images
 from chrome_ocr_engine import chrome_transcribe_page, get_screenai_engine
 from windows_ocr import get_ocr_engine, oneocr_transcribe_page
+from pdf_batch import BY_TYPE, PER_PDF, create_jobs, place_pagemap
+from pdf_pipeline import process_pdf
 
 
 class OCRApp:
@@ -26,14 +28,16 @@ class OCRApp:
         self.root.resizable(True, True)
 
         self.running = False
+        self.pdf_paths = []
 
         # --- Input source ---
         src_frame = ttk.LabelFrame(root, text="Input Source", padding=8)
         src_frame.pack(fill="x", padx=10, pady=(10, 4))
 
         self.input_type = tk.StringVar(value="pdf")
-        ttk.Radiobutton(src_frame, text="PDF File", variable=self.input_type, value="pdf").grid(row=0, column=0, sticky="w")
-        ttk.Radiobutton(src_frame, text="Image Folder", variable=self.input_type, value="dir").grid(row=0, column=1, sticky="w", padx=(10, 0))
+        ttk.Radiobutton(src_frame, text="PDF File", variable=self.input_type, value="pdf", command=self._input_type_changed).grid(row=0, column=0, sticky="w")
+        ttk.Radiobutton(src_frame, text="Batch PDFs", variable=self.input_type, value="pdfs", command=self._input_type_changed).grid(row=0, column=1, sticky="w", padx=(10, 0))
+        ttk.Radiobutton(src_frame, text="Image Folder", variable=self.input_type, value="dir", command=self._input_type_changed).grid(row=0, column=2, sticky="w", padx=(10, 0))
 
         self.input_path = tk.StringVar()
         path_frame = ttk.Frame(src_frame)
@@ -47,13 +51,15 @@ class OCRApp:
         out_frame = ttk.LabelFrame(root, text="Output", padding=8)
         out_frame.pack(fill="x", padx=10, pady=4)
 
-        ttk.Label(out_frame, text="Transcript:").grid(row=0, column=0, sticky="w")
+        self.output_label = ttk.Label(out_frame, text="Transcript:")
+        self.output_label.grid(row=0, column=0, sticky="w")
         self.output_file = tk.StringVar(value="book_transcript")
         ttk.Entry(out_frame, textvariable=self.output_file, width=50).grid(row=0, column=1, sticky="ew", padx=(4, 4))
         ttk.Button(out_frame, text="Browse", command=self._browse_output).grid(row=0, column=2)
 
         self.folder_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(out_frame, text="Save in folder", variable=self.folder_var).grid(row=0, column=3, sticky="w", padx=(12, 0))
+        self.folder_check = ttk.Checkbutton(out_frame, text="Save in folder", variable=self.folder_var)
+        self.folder_check.grid(row=0, column=3, sticky="w", padx=(12, 0))
 
         self.skip_ocr_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(out_frame, text="Skip OCR (re-export from existing md)", variable=self.skip_ocr_var).grid(row=0, column=4, sticky="w", padx=(12, 0))
@@ -66,6 +72,14 @@ class OCRApp:
             var = tk.BooleanVar(value=fmt == "md")
             self.format_vars[fmt] = var
             ttk.Checkbutton(fmt_frame, text=fmt, variable=var).grid(row=0, column=col, sticky="w", padx=(0, 12))
+
+        self.batch_layout = tk.StringVar(value=PER_PDF)
+        self.layout_frame = ttk.Frame(out_frame)
+        ttk.Label(self.layout_frame, text="Batch layout:").pack(side="left")
+        ttk.Radiobutton(self.layout_frame, text="One folder per PDF", variable=self.batch_layout, value=PER_PDF).pack(side="left", padx=(8, 0))
+        ttk.Radiobutton(self.layout_frame, text="Group into markdown/ and pagemaps/", variable=self.batch_layout, value=BY_TYPE).pack(side="left", padx=(8, 0))
+        self.layout_frame.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        self.layout_frame.grid_remove()
 
         out_frame.columnconfigure(1, weight=1)
 
@@ -142,9 +156,33 @@ class OCRApp:
 
     # --- File dialogs ---
 
+    def _input_type_changed(self):
+        self.pdf_paths = []
+        self.input_path.set("")
+        is_batch = self.input_type.get() == "pdfs"
+        self.output_label.configure(text="Output folder:" if is_batch else "Transcript:")
+        if is_batch:
+            self.output_file.set("transcripts")
+            self.folder_check.grid_remove()
+            self.layout_frame.grid()
+        else:
+            self.folder_check.grid()
+            self.layout_frame.grid_remove()
+
     def _browse_input(self):
-        if self.input_type.get() == "dir":
+        input_type = self.input_type.get()
+        if input_type == "dir":
             path = filedialog.askdirectory(title="Select image folder")
+        elif input_type == "pdfs":
+            paths = filedialog.askopenfilenames(
+                title="Select PDF files",
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            )
+            if paths:
+                self.pdf_paths = [Path(path) for path in paths]
+                self.input_path.set(f"{len(paths)} PDF files selected")
+                self.output_file.set(str(self.pdf_paths[0].parent / "transcripts"))
+            return
         else:
             path = filedialog.askopenfilename(
                 title="Select PDF file",
@@ -156,6 +194,11 @@ class OCRApp:
                 self.output_file.set(Path(path).stem + "_transcript")
 
     def _browse_output(self):
+        if self.input_type.get() == "pdfs":
+            path = filedialog.askdirectory(title="Select output folder")
+            if path:
+                self.output_file.set(path)
+            return
         path = filedialog.asksaveasfilename(
             title="Save transcript as",
             defaultextension=".md",
@@ -228,6 +271,10 @@ class OCRApp:
             input_path = Path(self.input_path.get().strip())
             input_type = self.input_type.get()
             engine = self.engine_var.get()
+
+            if input_type == "pdfs":
+                self._run_pdf_batch(engine)
+                return
 
             if self.skip_ocr_var.get():
                 output_base = self._output_base()
@@ -366,3 +413,73 @@ class OCRApp:
                 self.start_btn.configure(state="normal"),
                 self.stop_btn.configure(state="disabled"),
             ))
+
+    def _run_pdf_batch(self, engine):
+        if self.skip_ocr_var.get():
+            raise ValueError("Skip OCR is not supported for batch input")
+
+        jobs = create_jobs(self.pdf_paths, self.output_file.get(), self.batch_layout.get())
+        formats = [f for f, enabled in self.format_vars.items() if enabled.get()]
+        direction = self.direction_var.get()
+        log = lambda message: self.root.after(0, lambda text=message: self._log(text))
+        transcribe = None if engine == "inspector" else self._batch_transcriber(engine, log)
+        if engine != "inspector" and transcribe is None:
+            return
+
+        failures = []
+        completed = 0
+        for index, job in enumerate(jobs, start=1):
+            if not self.running:
+                break
+            log(f"\n=== PDF {index}/{len(jobs)}: {job.input_path.name} ===")
+            self.root.after(0, lambda i=index: self.status_label.configure(text=f"PDF {i}/{len(jobs)}"))
+            try:
+                process_pdf(
+                    job.input_path, job.output_base, formats, direction, engine,
+                    transcribe=transcribe, dpi=int(self.dpi_var.get()),
+                    limit=self.page_limit.get() or None,
+                    workers=self.workers_var.get(), log=log,
+                    progress=lambda page, total, elapsed, name: self.root.after(
+                        0, lambda i=index, p=page, t=total: self._batch_progress(i, len(jobs), p, t)
+                    ),
+                    should_stop=lambda: not self.running,
+                )
+                place_pagemap(job)
+            except Exception as error:
+                failures.append(job.input_path)
+                log(f"[ERROR] {job.input_path.name}: {error}")
+            completed += 1
+
+        log(f"\nPDFs succeeded: {completed - len(failures)}/{len(jobs)}")
+        status = "Stopped" if not self.running else ("Done with errors" if failures else "Done")
+        self.root.after(0, lambda: self.status_label.configure(text=status))
+
+    def _batch_progress(self, document, documents, page, pages):
+        self.progress.configure(maximum=pages, value=page)
+        self.status_label.configure(text=f"PDF {document}/{documents}, page {page}/{pages}")
+
+    def _batch_transcriber(self, engine, log):
+        if self.normalize_var.get():
+            normalizer = get_normalizer()
+            log("[INFO] Persian normalization enabled (hazm)")
+
+        if engine == "oneocr":
+            ocr_engine = get_ocr_engine()
+            transcribe = lambda path: oneocr_transcribe_page(ocr_engine, path)
+        elif engine == "chrome":
+            ocr_engine = get_screenai_engine()
+            transcribe = lambda path: chrome_transcribe_page(ocr_engine, path)
+        else:
+            cached, _ = model_cache_info()
+            if not cached:
+                size_gb = repo_size_gb()
+                if not self._ask_download(size_gb):
+                    log("Aborted - model not downloaded.")
+                    return None
+            processor, model, _ = load_model(
+                force_cpu=self.device_var.get() == "cpu", log=log,
+            )
+            max_tokens = self.max_tokens.get()
+            transcribe = lambda path: transcribe_page(processor, model, path, max_tokens)
+
+        return normalize_transcribe(transcribe, normalizer) if self.normalize_var.get() else transcribe
