@@ -58,9 +58,9 @@ class QtGuiSmokeTests(unittest.TestCase):
 
     # --- helpers ---
 
-    def _text_pdf(self, name="paper.pdf"):
+    def _text_pdf(self, name="paper.pdf", directory=None):
         """A small PDF with a real text layer."""
-        path = self.root / name
+        path = Path(directory or self.root) / name
         doc = fitz.open()
         page = doc.new_page()
         page.insert_text((72, 72), "OCR wrapper test page.")
@@ -165,6 +165,59 @@ class QtGuiSmokeTests(unittest.TestCase):
         self._start_and_wait()
 
         self.assertTrue((self.root / "book" / "book.md").is_file())
+
+    def test_save_next_to_input_is_off_by_default(self):
+        self.assertFalse(self.window.same_dir_check.isChecked())
+
+    def test_save_next_to_input_writes_beside_the_pdf(self):
+        books = self.root / "books"
+        books.mkdir()
+        pdf = self._text_pdf("paper.pdf", books)
+        # A bare name: without the option this would land in the CWD.
+        self._select_single_pdf(pdf, "transcript")
+        self.window.same_dir_check.setChecked(True)
+
+        self._start_and_wait()
+
+        self.assertTrue((books / "transcript.md").is_file())
+        self.assertFalse((Path.cwd() / "transcript.md").exists())
+
+    def test_save_next_to_input_creates_the_folder_beside_the_pdf(self):
+        books = self.root / "books"
+        books.mkdir()
+        pdf = self._text_pdf("paper.pdf", books)
+        self._select_single_pdf(pdf, "my_transcript", in_folder=True)
+        self.window.same_dir_check.setChecked(True)
+
+        self._start_and_wait()
+
+        self.assertTrue((books / "my_transcript" / "my_transcript.md").is_file())
+
+    def test_save_next_to_input_targets_the_image_folder_itself(self):
+        pages = self.root / "pages"
+        pages.mkdir()
+        self.window.input_type_buttons["dir"].setChecked(True)
+        self.window._input_type_changed()
+        self.window.input_path.setText(str(pages))
+        self.window.output_file.setText("pages_transcript")
+        self.window.folder_check.setChecked(False)
+        self.window.same_dir_check.setChecked(True)
+
+        self.assertEqual(self.window._output_base(), pages / "pages_transcript")
+
+        self.window.folder_check.setChecked(True)
+        self.assertEqual(
+            self.window._output_base(), pages / "pages_transcript" / "pages_transcript"
+        )
+
+    def test_save_next_to_input_is_hidden_for_batch(self):
+        self.window.input_type_buttons["pdfs"].setChecked(True)
+        self.window._input_type_changed()
+        self.assertFalse(self.window.same_dir_check.isVisibleTo(self.window))
+
+        self.window.input_type_buttons["pdf"].setChecked(True)
+        self.window._input_type_changed()
+        self.assertTrue(self.window.same_dir_check.isVisibleTo(self.window))
 
     def test_batch_by_type_layout_places_markdown_and_pagemap(self):
         pdfs = [self._text_pdf("first.pdf"), self._text_pdf("second.pdf")]
