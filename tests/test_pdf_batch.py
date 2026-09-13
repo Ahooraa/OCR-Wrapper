@@ -2,7 +2,36 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pdf_batch import BY_TYPE, MAX_OUTPUT_PATH, PER_PDF, create_jobs, place_pagemap
+from pdf_batch import (
+    BY_TYPE,
+    MAX_OUTPUT_PATH,
+    PER_PDF,
+    beside_input,
+    create_jobs,
+    place_pagemap,
+)
+
+
+class BesideInputTests(unittest.TestCase):
+    def test_pdf_transcript_lands_in_the_pdf_directory(self):
+        self.assertEqual(
+            beside_input(Path("/books/out/transcript"), Path("/books/paper.pdf")),
+            Path("/books/transcript"),
+        )
+
+    def test_image_folder_transcript_lands_inside_that_folder(self):
+        self.assertEqual(
+            beside_input(
+                Path("/books/transcript"), Path("/scans/pages"), source_is_dir=True
+            ),
+            Path("/scans/pages/transcript"),
+        )
+
+    def test_an_absolute_output_path_keeps_only_its_name(self):
+        self.assertEqual(
+            beside_input(Path("/elsewhere/a/b/transcript"), Path("/books/paper.pdf")),
+            Path("/books/transcript"),
+        )
 
 
 class PDFBatchTests(unittest.TestCase):
