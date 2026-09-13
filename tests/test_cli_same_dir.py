@@ -11,15 +11,15 @@ from unittest.mock import patch
 try:
     import fitz
 
-    import book_ocr_batch
+    import main
 except ImportError as error:  # pragma: no cover - depends on the environment
-    book_ocr_batch = None
+    main = None
     SKIP_REASON = f"CLI test dependencies unavailable: {error}"
 else:
     SKIP_REASON = ""
 
 
-@unittest.skipIf(book_ocr_batch is None, SKIP_REASON)
+@unittest.skipIf(main is None, SKIP_REASON)
 class SameDirCliTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = TemporaryDirectory()
@@ -37,10 +37,10 @@ class SameDirCliTests(unittest.TestCase):
         return path
 
     def _run_cli(self, *args):
-        argv = ["book_ocr_batch.py", *args]
+        argv = ["main.py", *args]
         # The pipeline logs to stdout; keep the test output readable.
         with patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
-            return book_ocr_batch.main()
+            return main.main()
 
     def test_same_dir_writes_beside_the_pdf(self):
         pdf = self._text_pdf()
