@@ -35,14 +35,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from model import MODEL_ID, load_model, model_cache_info, repo_size_gb
-from normalize import get_normalizer, normalize_transcribe
-from ocr import FORMATS, run_ocr_pages, transcribe_page, write_outputs
+from model import MODEL_ID
+from ocr import FORMATS, run_ocr_pages, write_outputs
 from pages import get_page_images
 from pdf_batch import BY_TYPE, PER_PDF, beside_input, create_jobs, place_pagemap
 from pdf_pipeline import process_pdf
-from chrome_ocr_engine import chrome_transcribe_page, get_screenai_engine
-from windows_ocr import get_ocr_engine, oneocr_transcribe_page
+from transcriber import build_transcriber, uses_page_transcriber
 
 DPI_CHOICES = ("150", "200", "300", "400")
 PDF_FILTER = "PDF files (*.pdf);;All files (*)"
@@ -152,15 +150,15 @@ class OCRWorker(QObject):
         if not settings.input_path.is_file():
             self.failed.emit(f"PDF not found: {settings.input_path}")
             return
-        if settings.engine == "inspector":
-            transcribe = None
-        else:
+        if uses_page_transcriber(settings.engine):
             transcribe = self._transcriber()
             if transcribe is None:
                 return
             self.log.emit(
                 f"Rendering PDF pages at {settings.dpi} DPI (lazy, page by page)..."
             )
+        else:
+            transcribe = None
 
         process_pdf(
             settings.input_path, settings.output_base, settings.formats,
@@ -179,7 +177,7 @@ class OCRWorker(QObject):
         if not settings.input_path.is_dir():
             self.failed.emit(f"Folder not found: {settings.input_path}")
             return
-        if settings.engine == "inspector":
+        if not uses_page_transcriber(settings.engine):
             self.failed.emit(
                 "pdf-inspector only processes PDF files. "
                 "Pick a PDF or switch to another engine."
@@ -218,12 +216,12 @@ class OCRWorker(QObject):
     def _run_pdf_batch(self):
         settings = self.settings
         jobs = create_jobs(settings.pdf_paths, settings.output_dir, settings.batch_layout)
-        if settings.engine == "inspector":
-            transcribe = None
-        else:
+        if uses_page_transcriber(settings.engine):
             transcribe = self._transcriber()
             if transcribe is None:
                 return
+        else:
+            transcribe = None
 
         failures = []
         completed = 0
@@ -280,45 +278,21 @@ class OCRWorker(QObject):
         return report
 
     def _transcriber(self):
-        """Build the page transcriber for the selected engine.
+        """Page transcriber for the selected engine, or None to stop cleanly.
 
-        Returns None when the user declined the model download, in which case
-        the run should stop without an error.
+        The engine wiring lives in transcriber.py so the CLI and the GUI build
+        their engines the same way; None means the download was declined.
         """
         settings = self.settings
-        normalizer = None
-        if settings.normalize:
-            normalizer = get_normalizer()
-            self.log.emit("[INFO] Persian normalization enabled (hazm)")
-
-        if settings.engine == "oneocr":
-            self.status.emit("Loading Windows OCR engine...")
-            ocr_engine = get_ocr_engine()
-            transcribe = lambda path: oneocr_transcribe_page(ocr_engine, path)
-        elif settings.engine == "chrome":
-            self.status.emit("Loading Chrome Screen AI...")
-            ocr_engine = get_screenai_engine()
-            transcribe = lambda path: chrome_transcribe_page(ocr_engine, path)
-        elif settings.engine == "bina":
-            cached, _ = model_cache_info()
-            if not cached:
-                size_gb = repo_size_gb()
-                self.log.emit(
-                    f"[INFO] Model {MODEL_ID} is not downloaded yet (~{size_gb:.1f} GB)."
-                )
-                if not self._ask_download(size_gb):
-                    self.log.emit("Aborted - model not downloaded.")
-                    return None
-            self.status.emit("Loading model...")
-            processor, model, _ = load_model(force_cpu=settings.force_cpu, log=self.log.emit)
-            max_tokens = settings.max_tokens
-            transcribe = lambda path: transcribe_page(processor, model, path, max_tokens)
-        else:
-            raise ValueError(f"Engine {settings.engine!r} has no page transcriber")
-
-        if normalizer is not None:
-            transcribe = normalize_transcribe(transcribe, normalizer)
-        return transcribe
+        return build_transcriber(
+            settings.engine,
+            normalize=settings.normalize,
+            force_cpu=settings.force_cpu,
+            max_new_tokens=settings.max_tokens,
+            log=self.log.emit,
+            confirm_download=self._ask_download,
+            status=self.status.emit,
+        )
 
 
 class OCRApp(QMainWindow):
