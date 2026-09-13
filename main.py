@@ -1,9 +1,9 @@
 """Batch OCR using the Bina-0.1 Persian OCR vision-language model.
 
 Usage:
-    python book_ocr_batch.py --input_dir ./book_pages --output_file book_transcript.md
-    python book_ocr_batch.py --pdf book.pdf --output_file book_transcript.md
-    python book_ocr_batch.py --gui
+    python main.py --input_dir ./book_pages --output_file book_transcript.md
+    python main.py --pdf book.pdf --output_file book_transcript.md
+    python main.py --gui
 """
 
 import argparse
@@ -12,50 +12,47 @@ from pathlib import Path
 from tqdm import tqdm
 
 from gui import launch_gui
-from model import ENGINES, MODEL_ID, load_model, model_cache_info, repo_size_gb
-from ocr import FORMATS, run_ocr_pages, transcribe_page
+from model import ENGINES
+from ocr import FORMATS, run_ocr_pages
 from pages import get_page_images
-from normalize import get_normalizer, normalize_transcribe
-from chrome_ocr_engine import chrome_transcribe_page, get_screenai_engine
-from windows_ocr import get_ocr_engine, oneocr_transcribe_page
 from pdf_batch import BATCH_LAYOUTS, PER_PDF, beside_input, create_jobs, place_pagemap
 from pdf_pipeline import process_pdf
+from transcriber import build_transcriber, uses_page_transcriber
 
 
-def create_transcriber(args):
-    """Initialize one OCR engine for a single file or an entire batch."""
-    if args.engine == "oneocr":
-        engine = get_ocr_engine()
-        transcribe = lambda p: oneocr_transcribe_page(engine, p)
-    elif args.engine == "chrome":
-        engine = get_screenai_engine()
-        transcribe = lambda p: chrome_transcribe_page(engine, p)
-    else:
-        cached, _ = model_cache_info()
-        if not cached:
-            print(f"[INFO] Model {MODEL_ID} is not downloaded yet (~{repo_size_gb():.1f} GB).")
-            try:
-                confirm = input("Download it now? [y/N] ")
-            except EOFError:
-                confirm = ""
-            if confirm.strip().lower() not in ("y", "yes"):
-                print("Aborted - model not downloaded.")
-                return None
-        processor, model, _ = load_model(force_cpu=args.cpu)
-        transcribe = lambda p: transcribe_page(processor, model, p, args.max_new_tokens)
+def confirm_download(size_gb):
+    """Console prompt before pulling the model (a piped run declines)."""
+    try:
+        answer = input("Download it now? [y/N] ")
+    except EOFError:
+        answer = ""
+    return answer.strip().lower() in ("y", "yes")
 
-    if args.normalize:
-        transcribe = normalize_transcribe(transcribe, get_normalizer())
-        print("[INFO] Persian normalization enabled (hazm)")
-    return transcribe
+
+def make_transcriber(args):
+    """Transcriber for one file or an entire batch.
+
+    None means either that the engine works on whole documents (pdf-inspector)
+    or that the model download was declined.
+    """
+    if not uses_page_transcriber(args.engine):
+        return None
+    return build_transcriber(
+        args.engine,
+        normalize=args.normalize,
+        force_cpu=args.cpu,
+        max_new_tokens=args.max_new_tokens,
+        log=print,
+        confirm_download=confirm_download,
+    )
 
 
 def run_pdf_batch(args, parser):
     if args.skip_ocr:
         parser.error("--skip-ocr is not supported with --pdfs")
     jobs = create_jobs((Path(path) for path in args.pdfs), args.output_dir, args.batch_layout)
-    transcribe = None if args.engine == "inspector" else create_transcriber(args)
-    if args.engine != "inspector" and transcribe is None:
+    transcribe = make_transcriber(args)
+    if transcribe is None and uses_page_transcriber(args.engine):
         return 1
 
     failures = []
@@ -126,8 +123,8 @@ def main():
         return
 
     if args.pdf:
-        transcribe = None if args.engine == "inspector" else create_transcriber(args)
-        if args.engine != "inspector" and transcribe is None:
+        transcribe = make_transcriber(args)
+        if transcribe is None and uses_page_transcriber(args.engine):
             return 1
         process_pdf(
             args.pdf, output_base, args.formats, args.direction, args.engine,
@@ -142,7 +139,7 @@ def main():
     total_pages = len(pages)
     print(f"[INFO] Found {total_pages} pages to process.")
 
-    transcribe = create_transcriber(args)
+    transcribe = make_transcriber(args)
     if transcribe is None:
         return 1
 
