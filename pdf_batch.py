@@ -20,6 +20,18 @@ class PDFJob:
     pagemap_path: Path
 
 
+def beside_input(output_base, source, source_is_dir: bool = False) -> Path:
+    """Move an output base next to its input.
+
+    A PDF's outputs land in that PDF's own directory; an image folder's outputs
+    land inside that folder. Only the name of `output_base` is kept, so an
+    absolute path picked in the GUI does not drag outputs away from the input.
+    """
+    source = Path(source)
+    directory = source if source_is_dir else source.parent
+    return directory / Path(output_base).name
+
+
 def validate_pdfs(paths: Iterable[Path]) -> list[Path]:
     """Validate and de-duplicate explicitly selected PDFs."""
     pdfs = []
