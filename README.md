@@ -15,7 +15,7 @@ Batch OCR extraction wrapping 4 engines: [Reza2kn/Bina-0.1](https://huggingface.
 - **Kindle-ready Persian** 📖 — ebook outputs pre-shape Arabic-script runs into joined presentation forms (via arabic-reshaper) so Kindle e-ink renders the script correctly
 - **Parallel workers** 🚀 — optionally OCR pages concurrently (threads; the chrome engine uses processes since its DLL isn't thread-safe)
 - **Skip OCR** ⏭️ — re-export an existing transcript to other formats without re-running the model
-- **Tkinter GUI** 🖥️ — file pickers, format checkboxes, progress bar, live log, engine + GPU/CPU/DPI/workers/direction selectors (launches by default with no args)
+- **Qt GUI (PySide6)** 🖥️ — file pickers, format checkboxes, batch layout selector, progress bar, live log, engine + GPU/CPU/DPI/workers/direction selectors (launches by default with no args); OCR runs on a worker thread and reports back through Qt signals
 - **CLI mode** ⌨️ — for scripting and batch runs
 - **CPU fallback** 💻 — `--cpu` flag, or GPU/CPU selector in the GUI
 - **Modular code** 🧱 — split into `model.py`, `pages.py`, `ocr.py`, `inspector.py`, `windows_ocr.py`, `chrome_ocr_engine.py`, `normalize.py`, `gui.py` around the `book_ocr_batch.py` entry point
@@ -217,6 +217,7 @@ python -c "from windows_ocr import get_ocr_engine; get_ocr_engine(); print('oneo
 - Expect minutes/page on low-end GPUs; ~10-30s/page on a proper GPU
 - `torch.cuda.empty_cache()` runs every 10 pages for low-VRAM GPUs
 - Stop button (GUI) / Ctrl-C (CLI) stops after the current page
+- The GUI is PySide6 (Qt), installed by `requirements.txt`. On a headless Linux box it also needs the usual Qt X11 runtime libs (`libxcb-*`); without a display, use the CLI instead
 
 ## License 📄
 
