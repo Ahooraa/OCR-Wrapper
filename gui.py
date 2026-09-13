@@ -39,7 +39,7 @@ from model import MODEL_ID, load_model, model_cache_info, repo_size_gb
 from normalize import get_normalizer, normalize_transcribe
 from ocr import FORMATS, run_ocr_pages, transcribe_page, write_outputs
 from pages import get_page_images
-from pdf_batch import BY_TYPE, PER_PDF, create_jobs, place_pagemap
+from pdf_batch import BY_TYPE, PER_PDF, beside_input, create_jobs, place_pagemap
 from pdf_pipeline import process_pdf
 from chrome_ocr_engine import chrome_transcribe_page, get_screenai_engine
 from windows_ocr import get_ocr_engine, oneocr_transcribe_page
@@ -393,18 +393,25 @@ class OCRApp(QMainWindow):
         browse.clicked.connect(self._browse_output)
         grid.addWidget(browse, 0, 2)
 
-        # The two checkboxes get their own row: next to the entry they make the
+        # Checkboxes get their own rows: sharing a row with the entry makes the
         # window far wider than it needs to be.
-        checks_row = QHBoxLayout()
+        location_row = QHBoxLayout()
         self.folder_check = QCheckBox("Save in folder")
         self.folder_check.setChecked(True)
-        checks_row.addWidget(self.folder_check)
-        self.skip_ocr_check = QCheckBox("Skip OCR (re-export from existing md)")
-        checks_row.addWidget(self.skip_ocr_check)
-        checks_row.addStretch(1)
-        grid.addLayout(checks_row, 1, 0, 1, 3)
+        location_row.addWidget(self.folder_check)
+        self.same_dir_check = QCheckBox("Save next to input")
+        self.same_dir_check.setToolTip(
+            "Write the transcript beside the source PDF, or inside the image "
+            "folder, instead of the current directory. The name above is kept."
+        )
+        location_row.addWidget(self.same_dir_check)
+        location_row.addStretch(1)
+        grid.addLayout(location_row, 1, 0, 1, 3)
 
-        grid.addWidget(QLabel("Formats:"), 2, 0, Qt.AlignmentFlag.AlignLeft)
+        self.skip_ocr_check = QCheckBox("Skip OCR (re-export from existing md)")
+        grid.addWidget(self.skip_ocr_check, 2, 0, 1, 3, Qt.AlignmentFlag.AlignLeft)
+
+        grid.addWidget(QLabel("Formats:"), 3, 0, Qt.AlignmentFlag.AlignLeft)
         formats_row = QHBoxLayout()
         self.format_boxes = {}
         for fmt in FORMATS:
@@ -413,7 +420,7 @@ class OCRApp(QMainWindow):
             self.format_boxes[fmt] = check
             formats_row.addWidget(check)
         formats_row.addStretch(1)
-        grid.addLayout(formats_row, 2, 1, 1, 2)
+        grid.addLayout(formats_row, 3, 1, 1, 2)
 
         self.layout_row = QWidget()
         layout_row = QHBoxLayout(self.layout_row)
@@ -428,7 +435,7 @@ class OCRApp(QMainWindow):
         for button in self.layout_buttons.values():
             layout_row.addWidget(button)
         layout_row.addStretch(1)
-        grid.addWidget(self.layout_row, 3, 0, 1, 3)
+        grid.addWidget(self.layout_row, 4, 0, 1, 3)
 
         grid.setColumnStretch(1, 1)
         return box
@@ -563,8 +570,13 @@ class OCRApp(QMainWindow):
     def _input_type(self):
         return _radio_value(self.input_type_buttons, "pdf")
 
+    def _input_path(self):
+        return Path(self.input_path.text().strip())
+
     def _output_base(self):
         base = Path(self.output_file.text())
+        if self.same_dir_check.isChecked():
+            base = beside_input(base, self._input_path(), self._input_type() == "dir")
         if self.folder_check.isChecked():
             base = base / base.name
         return base
@@ -599,10 +611,14 @@ class OCRApp(QMainWindow):
         if is_batch:
             self.output_file.setText("transcripts")
             self.folder_check.setVisible(False)
+            # Batch inputs can live in different directories, so "next to input"
+            # is ambiguous there - the output folder picker covers it.
+            self.same_dir_check.setVisible(False)
             self.skip_ocr_check.setVisible(False)
             self.layout_row.setVisible(True)
         else:
             self.folder_check.setVisible(True)
+            self.same_dir_check.setVisible(True)
             self.skip_ocr_check.setVisible(True)
             self.layout_row.setVisible(False)
 
