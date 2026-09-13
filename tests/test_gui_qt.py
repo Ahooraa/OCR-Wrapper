@@ -112,7 +112,7 @@ class QtGuiSmokeTests(unittest.TestCase):
     # --- tests ---
 
     def test_launch_gui_enters_and_leaves_the_event_loop(self):
-        """book_ocr_batch.py launches the app through this entry point."""
+        """main.py launches the app through this entry point."""
         QTimer.singleShot(0, self.app.quit)
         self.assertEqual(gui.launch_gui(), 0)
 
