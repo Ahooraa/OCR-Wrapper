@@ -18,7 +18,7 @@ Batch OCR extraction wrapping 4 engines: [Reza2kn/Bina-0.1](https://huggingface.
 - **Qt GUI (PySide6)** 🖥️ — file pickers, format checkboxes, batch layout selector, progress bar, live log, engine + GPU/CPU/DPI/workers/direction selectors (launches by default with no args); OCR runs on a worker thread and reports back through Qt signals
 - **CLI mode** ⌨️ — for scripting and batch runs
 - **CPU fallback** 💻 — `--cpu` flag, or GPU/CPU selector in the GUI
-- **Modular code** 🧱 — split into `model.py`, `pages.py`, `ocr.py`, `inspector.py`, `windows_ocr.py`, `chrome_ocr_engine.py`, `normalize.py`, `gui.py` around the `book_ocr_batch.py` entry point
+- **Modular code** 🧱 — split into `model.py`, `pages.py`, `ocr.py`, `inspector.py`, `windows_ocr.py`, `chrome_ocr_engine.py`, `normalize.py`, `transcriber.py` (one place that wires up every engine, shared by the CLI and the GUI), `pdf_batch.py`, `pdf_pipeline.py`, `gui.py` around the `main.py` entry point
 - **Model check before download** 📥 — shows cache status and repo size, asks before downloading
 
 ## Requirements 🛠️
@@ -45,31 +45,31 @@ pip install -r requirements.txt
 ### GUI (default) 🖥️
 
 ```bash
-python book_ocr_batch.py
+python main.py
 ```
 
 ### CLI — PDF 📄
 
 ```bash
-python book_ocr_batch.py --pdf book.pdf --output_file transcript
+python main.py --pdf book.pdf --output_file transcript
 ```
 
 Keep the outputs next to the source PDF instead of the working directory (`--output_file` then supplies only the name):
 
 ```bash
-python book_ocr_batch.py --pdf books/paper.pdf --output_file transcript --same_dir
+python main.py --pdf books/paper.pdf --output_file transcript --same_dir
 ```
 
 Fast text extraction of a text-based PDF (no OCR, no model download):
 
 ```bash
-python book_ocr_batch.py --pdf book.pdf --engine inspector --output_file transcript
+python main.py --pdf book.pdf --engine inspector --output_file transcript
 ```
 
 Process several selected PDFs with the same settings:
 
 ```bash
-python book_ocr_batch.py --pdfs paper-one.pdf paper-two.pdf --engine inspector --direction ltr --output_dir transcripts
+python main.py --pdfs paper-one.pdf paper-two.pdf --engine inspector --direction ltr --output_dir transcripts
 ```
 
 Batch mode offers two output layouts:
@@ -83,25 +83,25 @@ openable by Windows applications that enforce the legacy path-length limit.
 Windows Snipping Tool OCR (high accuracy, fully offline — needs model files, see [oneocr setup](#oneocr-setup-windows-snipping-tool-ocr)):
 
 ```bash
-python book_ocr_batch.py --pdf book.pdf --engine oneocr --output_file transcript
+python main.py --pdf book.pdf --engine oneocr --output_file transcript
 ```
 
 With Persian normalization (reinserts half-spaces/ZWNJ that OCR models often drop — recommended for Persian text):
 
 ```bash
-python book_ocr_batch.py --pdf book.pdf --engine oneocr --normalize --output_file transcript
+python main.py --pdf book.pdf --engine oneocr --normalize --output_file transcript
 ```
 
 Chrome/Edge Screen AI OCR (offline, layout-aware — needs setup, see Notes):
 
 ```bash
-python book_ocr_batch.py --pdf book.pdf --engine chrome --output_file transcript
+python main.py --pdf book.pdf --engine chrome --output_file transcript
 ```
 
 ### CLI — Image folder 🖼️
 
 ```bash
-python book_ocr_batch.py --input_dir ./pages --output_file transcript
+python main.py --input_dir ./pages --output_file transcript
 ```
 
 ### Exporting to multiple formats 📦
@@ -109,19 +109,19 @@ python book_ocr_batch.py --input_dir ./pages --output_file transcript
 `--output_file` is a base name; an extension is added per selected format. `epub`/`pdf`/`azw3` need calibre and build on each other (md → epub → pdf/azw3):
 
 ```bash
-python book_ocr_batch.py --pdf book.pdf --formats md txt epub azw3 --output_file transcript
+python main.py --pdf book.pdf --formats md txt epub azw3 --output_file transcript
 ```
 
 Spread the page load across workers (2-8; `bina` stays single-device, `chrome` uses processes):
 
 ```bash
-python book_ocr_batch.py --pdf book.pdf --engine chrome --workers 4 --output_file transcript
+python main.py --pdf book.pdf --engine chrome --workers 4 --output_file transcript
 ```
 
 Re-export an existing markdown transcript without re-running OCR:
 
 ```bash
-python book_ocr_batch.py --skip-ocr --output_file transcript --formats epub azw3
+python main.py --skip-ocr --output_file transcript --formats epub azw3
 ```
 
 ### Options ⚙️
